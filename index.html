@@ -381,7 +381,21 @@
                         </div>
                         <div class="admin-form-row">
                             <div class="admin-form-group"><label>Badge</label><select id="apBadge"><option value="">None</option><option value="HOT">🔥 HOT</option><option value="NEW">✨ NEW</option><option value="SALE">💰 SALE</option><option value="LIMITED">⭐ LIMITED</option></select></div>
-                            <div class="admin-form-group"><label>Image URL</label><input type="text" id="apImage" placeholder="https://..."></div>
+                        </div>
+                        <div class="admin-form-group">
+                            <label>Main Image 📷</label>
+                            <input type="file" id="apImageFile" accept="image/*" onchange="uploadImage(this,'apImage')">
+                            <input type="text" id="apImage" placeholder="URL will be filled after upload">
+                        </div>
+                        <div class="admin-form-group">
+                            <label>SKU Images 📷</label>
+                            <input type="file" id="apSkuImagesFile" accept="image/*" multiple onchange="uploadImages(this,'apSkuImages')">
+                            <input type="text" id="apSkuImages" placeholder="URLs will be filled after upload">
+                        </div>
+                        <div class="admin-form-group">
+                            <label>Detail Images 📷</label>
+                            <input type="file" id="apDetailImagesFile" accept="image/*" multiple onchange="uploadImages(this,'apDetailImages')">
+                            <input type="text" id="apDetailImages" placeholder="URLs will be filled after upload">
                         </div>
                         <div class="admin-form-group"><label>Description (EN)</label><input type="text" id="apDesc"></div>
                         <div class="admin-form-group"><label>描述 (中文)</label><input type="text" id="apDescZh"></div>
@@ -835,10 +849,94 @@
         document.getElementById('apStock').value = p ? p.stock : 100;
         document.getElementById('apBadge').value = p ? (p.badge || '') : '';
         document.getElementById('apImage').value = p ? (p.main_image || '') : '';
+        document.getElementById('apSkuImages').value = p && p.sku_images ? JSON.stringify(p.sku_images) : '[]';
+        document.getElementById('apDetailImages').value = p && p.detail_images ? JSON.stringify(p.detail_images) : '[]';
         document.getElementById('apDesc').value = p ? (p.description || '') : '';
         document.getElementById('apDescZh').value = p ? (p.description_zh || '') : '';
     }
     function cancelProductForm() { document.getElementById('productFormCard').style.display = 'none'; }
+
+    // Upload single image to Supabase Storage
+    async function uploadImage(input, targetId) {
+        const file = input.files[0];
+        if (!file) return;
+        if (!sb) { showToast('Please login first'); return; }
+        
+        const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+        showToast(currentLang === 'zh' ? '⏳ 上传中...' : '⏳ Uploading...');
+        
+        try {
+            const uploadUrl = `${sb.supabaseUrl}/storage/v1/object/product-images/${fileName}`;
+            const formData = new FormData();
+            formData.append('', file);
+            
+            await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', uploadUrl);
+                xhr.setRequestHeader('apikey', sb.supabaseKey);
+                // No Authorization header - bucket is public
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(JSON.parse(xhr.responseText));
+                    } else {
+                        reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Network error'));
+                xhr.send(formData);
+            });
+            
+            const publicUrl = `${sb.supabaseUrl}/storage/v1/object/public/product-images/${fileName}`;
+            document.getElementById(targetId).value = publicUrl;
+            showToast(currentLang === 'zh' ? '✅ 上传成功！' : '✅ Uploaded!');
+        } catch (err) {
+            console.error(err);
+            showToast(currentLang === 'zh' ? '❌ 上传失败: ' + err.message : '❌ Upload failed: ' + err.message);
+        }
+    }
+
+    // Upload multiple images to Supabase Storage
+    async function uploadImages(input, targetId) {
+        const files = input.files;
+        if (!files || files.length === 0) return;
+        if (!sb) { showToast('Please login first'); return; }
+        
+        showToast(currentLang === 'zh' ? '⏳ 上传中...' : '⏳ Uploading...');
+        const urls = [];
+        
+        try {
+            for (const file of files) {
+                const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                const uploadUrl = `${sb.supabaseUrl}/storage/v1/object/product-images/${fileName}`;
+                const formData = new FormData();
+                formData.append('', file);
+                
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', uploadUrl);
+                    xhr.setRequestHeader('apikey', sb.supabaseKey);
+                    // No Authorization header - bucket is public
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error('Network error'));
+                    xhr.send(formData);
+                });
+                
+                urls.push(`${sb.supabaseUrl}/storage/v1/object/public/product-images/${fileName}`);
+            }
+            
+            document.getElementById(targetId).value = JSON.stringify(urls);
+            showToast(currentLang === 'zh' ? '✅ 上传成功！' : '✅ Uploaded!');
+        } catch (err) {
+            console.error(err);
+            showToast(currentLang === 'zh' ? '❌ 上传失败: ' + err.message : '❌ Upload failed: ' + err.message);
+        }
+    }
 
     async function saveProduct(e) {
         e.preventDefault();
@@ -855,6 +953,8 @@
             badge: document.getElementById('apBadge').value || null,
             badge_zh: badgeMap[document.getElementById('apBadge').value] || null,
             main_image: document.getElementById('apImage').value,
+            sku_images: JSON.parse(document.getElementById('apSkuImages').value || '[]'),
+            detail_images: JSON.parse(document.getElementById('apDetailImages').value || '[]'),
             description: document.getElementById('apDesc').value,
             description_zh: document.getElementById('apDescZh').value,
         };
